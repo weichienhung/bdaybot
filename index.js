@@ -93,7 +93,7 @@ function handleLeave(event) {
 
 function schedule_push(groupId) {
   var schedule_job = check_and_push.bind(null, groupId);
-  var scheduleId = schedule.scheduleJob('*/5 * * * *', schedule_job);
+  var scheduleId = schedule.scheduleJob('30 8 * * *', schedule_job);
   scheduler[groupId] = scheduleId;
   console.log('schedule the push.');
   return Promise.resolve(null);
