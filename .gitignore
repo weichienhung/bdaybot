@@ -1,3 +1,5 @@
 node_modules/
 sftp-config.json
 rhel*
+.env
+bday_data.json
