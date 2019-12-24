@@ -2,6 +2,8 @@ var express = require('express');
 var line = require('@line/bot-sdk');
 var dotenv = require('dotenv');
 const admin = require('firebase-admin');
+var moment = require('moment');
+
 
 dotenv.config();
 var config = {  
@@ -131,11 +133,10 @@ function check_and_push(groupId) {
     console.log('no people data. no need to check');
     return;
   }
-  var today = new Date();
-  var dd = String(today.getDate()).padStart(2, '0');
-  var mm = String(today.getMonth() + 1).padStart(2, '0');
-  var mmdd = `${mm}-${dd}`
 
+  var utcDate = moment().utc().utcOffset('+08:00');
+  console.log(utcDate);
+  var mmdd = utcDate.format('MM-DD');
   if (!people[mmdd]) {
     console.log(`today is ${mmdd}. no one birthday`);
     return;
