@@ -1,9 +1,7 @@
 var express = require('express');
 var line = require('@line/bot-sdk');
 var dotenv = require('dotenv');
-var JSONParseError = require('@line/bot-sdk').JSONParseError
-var SignatureValidationFailed = require('@line/bot-sdk').SignatureValidationFailed
-var schedule = require('node-schedule');
+const admin = require('firebase-admin');
 
 dotenv.config();
 var config = {  
@@ -12,13 +10,46 @@ var config = {
 }
 
 var client = new line.Client(config);
-var scheduler = {};
 var app = express();
-var people;
+var db = null;
 
 app.get('/', function(req,res){
   res.send('hello world');
 });
+
+app.get('/check', function(req,res){
+  check_and_push();
+  res.status(200).end();
+}); 
+
+app.post('/linewebhook', line.middleware(config), (req, res) => {
+  Promise
+    .all(req.body.events.map(handleEvent))
+    .then((result) => res.json(result))
+    .catch((err) => {
+      showError(err);
+      res.status(500).end();
+    });
+});
+
+var getFirebaseDB = function() {
+  if (!db) {
+    var keyJsonString = process.env.SERVICE_ACCOUNT_KEY_JSON || JSON.stringify(require('./serviceAccountKey.json'));
+    try {
+      let serviceAccount = JSON.parse(keyJsonString);
+      admin.initializeApp({
+        credential: admin.credential.cert(serviceAccount)
+      });
+
+      db = admin.firestore();
+    } catch(e) {
+      console.error('invalid service account key string');
+      throw e;
+    }
+  }
+  return db;
+}
+
 
 var showError = function(err) {
   var error = err.originalError;
@@ -33,15 +64,6 @@ var showError = function(err) {
   }
 }
 
-app.post('/linewebhook', line.middleware(config), (req, res) => {
-  Promise
-    .all(req.body.events.map(handleEvent))
-    .then((result) => res.json(result))
-    .catch((err) => {
-      showError(err);
-      res.status(500).end();
-    });
-});
 
 function handleEvent(event) {
   console.log(event);
@@ -56,13 +78,13 @@ function handleEvent(event) {
 }
 
 function do_nothing(event) {
-  if (event.type !== 'message' || event.message.type !== 'text') {
-    return Promise.resolve(null);
-  }
+  // if (event.type !== 'message' || event.message.type !== 'text') {
+  //   return Promise.resolve(null);
+  // }
 
-  const echo = { type: 'text', text: `今天是 TEST 生日。生日快樂!\uD83C\uDF82` };
-  return client.replyMessage(event.replyToken, echo);
-  // return Promise.resolve(null);
+  // const echo = { type: 'text', text: `今天是 TEST 生日。生日快樂!\uD83C\uDF82` };
+  // return client.replyMessage(event.replyToken, echo);
+  return Promise.resolve(null);
 }
 
 function handleJoin(event) {
@@ -72,8 +94,24 @@ function handleJoin(event) {
     return client.replyMessage(event.replyToken, echo);
   }
 
+  let db = getFirebaseDB();
   var groupId = source.groupId;
-  schedule_push(groupId);
+
+  let docRef = db.collection('groups').doc(groupId);
+  docRef.get()
+  .then(doc => {
+    if (!doc.exists) {
+      let setResult = docRef.set({
+        lineGroupId: groupId
+      });
+    } else {
+      console.log('Already had doc in db');
+    }
+  })
+  .catch(err => {
+    console.log('Error getting document', err);
+  });
+
   var msg = { type: 'text', text: "L87生日機器人啟動" };
   return client.pushMessage(groupId, msg);
 }
@@ -81,25 +119,14 @@ function handleJoin(event) {
 function handleLeave(event) {
   var source = event.source;
 
-  console.log(scheduler);
+  let db = getFirebaseDB();
   var groupId = source.groupId;
-  if (scheduler[groupId]) {
-    scheduler[groupId].cancel();
-  } else {
-    console.log('Cannot find scheduleId by groupId:' + groupId);
-  }
-}
 
-
-function schedule_push(groupId) {
-  var schedule_job = check_and_push.bind(null, groupId);
-  var scheduleId = schedule.scheduleJob('30 8 * * *', schedule_job);
-  scheduler[groupId] = scheduleId;
-  console.log('schedule the push.');
-  return Promise.resolve(null);
+  let docRef = db.collection('groups').doc(groupId).delete();
 }
 
 function check_and_push(groupId) {
+  let people = get_bday_people();
   if (!people){
     console.log('no people data. no need to check');
     return;
@@ -115,24 +142,38 @@ function check_and_push(groupId) {
   }
   var person = people[mmdd];
   var msg = { type: 'text', text: `今天是 ${person} 生日。生日快樂!\uD83C\uDF82` };
-  client.pushMessage(groupId, msg)
-  .then((result) => {
-    console.log(result);
+
+  let db = getFirebaseDB();
+  db.collection('groups').get()
+  .then((snapshot) => {
+    snapshot.forEach((doc) => {
+      console.log(doc.id, '=>', doc.data());
+      const groupId = doc.data().lineGroupId;
+      client.pushMessage(groupId, msg)
+      .then((result) => {
+        console.log(`push message to ${groupId} success`);
+      })
+      .catch((err) => {
+        showError(err);
+      });
+
+    });
   })
   .catch((err) => {
     showError(err);
   });
 }
 
-var bday_string = process.env.BDAY_DATA || JSON.stringify(require('./bday_data.json'));
-(function init_bday(bday_string) {
+function get_bday_people() {
+  var bday_string = process.env.BDAY_DATA || JSON.stringify(require('./bday_data.json'));
   try {
     var bday = JSON.parse(bday_string);
-    people = bday.people;
+    return bday.people;
   } catch(e) {
     console.error('invalid json string');
   }
-})(bday_string);
+  return null;
+}
 
 app.listen(process.env.PORT || 80, function(){
   console.log('LineBot running');

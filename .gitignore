@@ -3,3 +3,4 @@ sftp-config.json
 rhel*
 .env
 bday_data.json
+serviceAccountKey.json
